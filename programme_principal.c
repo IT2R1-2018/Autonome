@@ -9,18 +9,20 @@
 	void PWM_Droite(int rapport_cyclique);
 	void PWM_Gauche(int rapport_cyclique);
 	void LidarInit();
-	void Tempo_Init();
+	void Tempo_Init(unsigned int prescaler, unsigned int valeur);
+	void affichage(int a);
 	
 	int etat = 0;
-	
-	void TIMER2_IRQHandler()
-	{
-		LPC_TIM2->IR |= (1<<0);
-		etat^=1;
-	}
+	int test = 0;
+void TIMER0_IRQHandler(void)
+{
+	LPC_TIM0->IR |= 1<<0;   // drapeau IT Timer0
+
+	test = 1;
+}
 	int main (void) 
   {
-		char  qualite,  angle1,  angle2,  distance1 ,  distance2, trame[5], a, Chaine_char[53];// Chaine de caractères (53 max en petite police / 20 max en grande police)
+		char  qualite,  angle1,  angle2,  distance1 ,  distance2, trame[5], a;// Chaine de caractères (53 max en petite police / 20 max en grande police)
 		int somme, etat=0, k;
 		long int i;
 		short angle, distance;
@@ -31,7 +33,9 @@
 		LidarInit();
 		GLCD_Init();						// Initialisation LCD
 		GLCD_Clear(White);			// Fond d'ecran en blanc
-		Tempo_Init();
+		Tempo_Init(1,6);
+		
+		NVIC_EnableIRQ(TIMER0_IRQn);
 		
 		LPC_GPIO2->FIODIR1=0x01;
 		
@@ -40,9 +44,6 @@
 		//LPC_UART2->THR = 0x20; // Envoi de la donnée (valeur 0x20)
 		
 		LPC_GPIO2->FIODIR0|=0x04;
-		
-		sprintf(Chaine_char, "Valeur = %03d", distance);	// creation chaine texte
-		GLCD_DisplayString (1,0,1,Chaine_char);		// affichage chaine ligne 0, colonne 0, petite police
 		
 		while(1)
 		{
@@ -53,11 +54,54 @@
          case 0: 
 					 PWM_Droite(70);
 					 PWM_Gauche(70);
-					 break;
+					 affichage(0);
+				 
+					 if(test == 1)
+					 {
+						 test = 0;
+						 Tempo_Init(0,7);
+				     etat = 1;
+					 }
+				 break;
+				 
 				 case 1: 
-					 PWM_Droite(80);
-					 PWM_Gauche(40);
-					 break;
+					 PWM_Droite(70);
+					 PWM_Gauche(50);
+				   affichage(1);
+				 
+				 if(test == 1)
+					 {
+						 test = 0;
+						 Tempo_Init(3,0);
+				     etat = 2;
+					 }
+				 break;
+				 
+				 case 2: 
+					 PWM_Droite(65);
+					 PWM_Gauche(65);
+				   affichage(2);
+				 if(test == 1)
+					 {
+						 test = 0;
+						 Tempo_Init(0,6);
+				     etat = 3;
+					 }
+				 break;
+					 
+				case 3: 
+					 PWM_Droite(70);
+					 PWM_Gauche(50);
+				   affichage(3);
+				  
+				 if(test == 1)
+					 {
+						 test = 0;
+						 Tempo_Init(1,7);
+				     etat = 0;
+					 }
+				 
+				 break;	 
     }
 		}
 		
@@ -132,17 +176,33 @@ void LidarInit(int rapport_cyclique)
 		LPC_PINCON->PINSEL7 = LPC_PINCON->PINSEL7 | 0x00300000;
 		LPC_PWM1->MR3 = rapport_cyclique;
 }
-void Tempo_Init()
+
+void Tempo_Init(unsigned int secondes, unsigned int decisecondes)
 {
-		LPC_SC->PCONP |= (1<<22);
-	  LPC_PINCON->PINSEL0 |= (3<<12);
+	float calcul = 0;
+	int valeur = 0;
 	
-		LPC_TIM2->CTCR = 0;
-	  LPC_TIM2->PR = 0;
-	  LPC_TIM2->MR0 = 100000000-1;
+	calcul = decisecondes/10.0;
+	if(decisecondes == 0) calcul = 1.0;
 	
-	  LPC_TIM2->MCR |= (3<<0);
+	calcul = 25000000*calcul;
 	
-		NVIC_SetPriority(TIMER2_IRQn,2);
-		NVIC_EnableIRQ(TIMER2_IRQn);
+	valeur = (int)calcul;
+	
+LPC_SC->PCONP |= (1<<1); //allume le timer 0 (facultatif, déjà allumé après un reset)
+
+LPC_TIM0->PR =  secondes;
+LPC_TIM0->MR0 = valeur; 
+
+LPC_TIM0->MCR = 3;		/*reset compteur si MR0=COUNTER + interruption*/
+
+LPC_TIM0->TCR = 1; 		//démarre le comptage
+} 
+
+void affichage(int a)
+{
+	char Chaine_char[53] = "";
+	
+	sprintf(Chaine_char, "Etat = %d", a);	// creation chaine texte
+	GLCD_DisplayString (1,0,1,Chaine_char);		// affichage chaine ligne 0, colonne 0, petite police
 }
