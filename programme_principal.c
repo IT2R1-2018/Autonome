@@ -1,41 +1,77 @@
 #include "LPC17xx.h"
 #include "uart.h"
 #include <stdio.h>
-#include "GPIO.h"
 #include "GLCD.h"
-  
-	
+#include "GPIO.h"
+#include "cmsis_os.h"                       // CMSIS RTOS header file
+#include "Driver_SPI.h"
+#include "Driver_USART.h"               // ::CMSIS Driver:USART
+
+	extern ARM_DRIVER_USART Driver_USART1;
+
 	void PWM_Init();
 	void PWM_Droite(int rapport_cyclique);
 	void PWM_Gauche(int rapport_cyclique);
 	void LidarInit();
-	void Tempo_Init(unsigned int prescaler, unsigned int valeur);
 	void affichage(int a);
+	void Init_UART(void);
+	void GetBTString(char *ptab,char delimFin);
 	
-	int etat = 0;
-	int test = 0;
-void TIMER0_IRQHandler(void)
-{
-	LPC_TIM0->IR |= 1<<0;   // drapeau IT Timer0
+	void automatique (void const *argument);                             // thread function
+	void gant (void const *argument);                             
+	void joystick (void const *argument);                             
+	
+	osThreadId tid_automatique, tid_gant, tid_joystick;                                          // thread id
+	
+	osThreadDef (automatique, osPriorityNormal, 1, 0);                   // thread object	
+	osThreadDef (gant, osPriorityNormal, 1, 0);                   
+	osThreadDef (joystick, osPriorityNormal, 1, 0);                   	
 
-	test = 1;
+void GetBTString(char *ptab,char delimFin)
+{
+	char RxBt;
+	
+	int i=0;
+
+	//On remplit le tableau avec les caractères qui suivent...
+	do
+	{
+		//Attente et réception d'un caractère
+		
+		Driver_USART1.Receive(&RxBt,1);
+		while(Driver_USART1.GetRxCount()<1);
+
+
+		//Si on vient de recevoir de délimiteur de FIN  ...
+		if(RxBt == delimFin)
+		{
+			ptab[i] = 'NULL';		//... on place le caractère NULL dans le tableau => on "cloture" la chaine de caractères...
+		}
+			            
+		else
+			{
+			ptab[i]=RxBt;		//... sinon on copie le caractère reçu dans le tableau
+		  }
+			           
+		i++;//on fait évoluer l'index du tableau
+	}
+	while(RxBt!=delimFin);//... Tant que le caractère reçu n'est pas le délimiteur de FIN
 }
-	int main (void) 
-  {
-		char  qualite,  angle1,  angle2,  distance1 ,  distance2, trame[5], a;// Chaine de caractères (53 max en petite police / 20 max en grande police)
+int main (void) 
+{		
+		char  qualite,  angle1,  angle2,  distance1 ,  distance2, trame[5], a, tab[1], mode = 0;// Chaine de caractères (53 max en petite police / 20 max en grande police)
 		int somme, etat=0, k;
 		long int i;
 		short angle, distance;
 	
+		osKernelInitialize ();  
+		
 		Init_UART();
-	  Initialise_GPIO (); // init GPIO
+	  Initialise_GPIO(); // init GPIO
 		PWM_Init();
-		LidarInit();
+		//LidarInit();
 		GLCD_Init();						// Initialisation LCD
 		GLCD_Clear(White);			// Fond d'ecran en blanc
-		Tempo_Init(1,6);
-		
-		NVIC_EnableIRQ(TIMER0_IRQn);
 		
 		LPC_GPIO2->FIODIR1=0x01;
 		
@@ -45,6 +81,33 @@ void TIMER0_IRQHandler(void)
 		
 		LPC_GPIO2->FIODIR0|=0x04;
 		
+		/*Driver_USART1.Receive(tab,1);
+		while(Driver_USART1.GetRxCount()<1);*/
+		
+		if(tab[0] == 0) 
+		{
+			mode = 0; //mode auto
+			tid_automatique = osThreadCreate (osThread(automatique), NULL);
+		}
+		else if(tab[0] == 1) 
+		{
+			mode = 1; //mode gant
+			tid_gant = osThreadCreate (osThread(gant), NULL);
+		}
+		else if(tab[0] == 2)
+		{
+			mode = 2; //mode nunchuck
+			tid_joystick = osThreadCreate (osThread(joystick), NULL);
+		}
+		
+		osKernelStart ();                         // start thread execution 
+		osDelay(osWaitForever);
+}
+
+void automatique (void const *argument)
+{
+		int etat = 0;
+	
 		while(1)
 		{
 			UART_PutChar(0xA5);
@@ -55,56 +118,48 @@ void TIMER0_IRQHandler(void)
 					 PWM_Droite(70);
 					 PWM_Gauche(70);
 					 affichage(0);
-				 
-					 if(test == 1)
-					 {
-						 test = 0;
-						 Tempo_Init(0,7);
-				     etat = 1;
-					 }
-				 break;
+					 osDelay(1600);
+					 etat = 1;
+					 
+					 break;
 				 
 				 case 1: 
 					 PWM_Droite(70);
 					 PWM_Gauche(50);
 				   affichage(1);
-				 
-				 if(test == 1)
-					 {
-						 test = 0;
-						 Tempo_Init(3,0);
-				     etat = 2;
-					 }
-				 break;
+					 osDelay(700);
+				   etat = 2;
+					 
+					 break;
 				 
 				 case 2: 
 					 PWM_Droite(65);
 					 PWM_Gauche(65);
 				   affichage(2);
-				 if(test == 1)
-					 {
-						 test = 0;
-						 Tempo_Init(0,6);
-				     etat = 3;
-					 }
-				 break;
+					 osDelay(3000);
+				   etat = 3;
+					 
+				   break;
 					 
 				case 3: 
 					 PWM_Droite(70);
 					 PWM_Gauche(50);
 				   affichage(3);
-				  
-				 if(test == 1)
-					 {
-						 test = 0;
-						 Tempo_Init(1,7);
-				     etat = 0;
-					 }
+					 osDelay(600);
+				   etat = 0;
 				 
-				 break;	 
+					 break;	 
     }
 		}
-		
+}
+void gant (void const *argument)
+{
+	osDelay(osWaitForever);
+}
+void joystick (void const *argument)
+{
+	osDelay(osWaitForever);
+}
 		/*while(1)
 		{	
 			
@@ -139,7 +194,7 @@ void TIMER0_IRQHandler(void)
 			}
 		
 		}*/
-	}
+	
 void PWM_Init()
 {
 	  LPC_PINCON->PINSEL4 = 0x00000005;
@@ -177,32 +232,11 @@ void LidarInit(int rapport_cyclique)
 		LPC_PWM1->MR3 = rapport_cyclique;
 }
 
-void Tempo_Init(unsigned int secondes, unsigned int decisecondes)
-{
-	float calcul = 0;
-	int valeur = 0;
-	
-	calcul = decisecondes/10.0;
-	if(decisecondes == 0) calcul = 1.0;
-	
-	calcul = 25000000*calcul;
-	
-	valeur = (int)calcul;
-	
-LPC_SC->PCONP |= (1<<1); //allume le timer 0 (facultatif, déjà allumé après un reset)
-
-LPC_TIM0->PR =  secondes;
-LPC_TIM0->MR0 = valeur; 
-
-LPC_TIM0->MCR = 3;		/*reset compteur si MR0=COUNTER + interruption*/
-
-LPC_TIM0->TCR = 1; 		//démarre le comptage
-} 
 
 void affichage(int a)
 {
 	char Chaine_char[53] = "";
 	
 	sprintf(Chaine_char, "Etat = %d", a);	// creation chaine texte
-	GLCD_DisplayString (1,0,1,Chaine_char);		// affichage chaine ligne 0, colonne 0, petite police
+	GLCD_DisplayString(1,0,1,Chaine_char);		// affichage chaine ligne 0, colonne 0, petite police
 }
